@@ -274,7 +274,6 @@ apps/minisatip/minisatip:
 	cd apps/minisatip && ./configure \
 		--enable-axe \
 		--disable-dvbca \
-		--disable-dvbapi \
 		--disable-dvbcsa \
 		--disable-dvbaes \
 		--disable-netcv \
