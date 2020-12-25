@@ -1,6 +1,6 @@
 # satip-axe
 
-![Build firmware](https://github.com/Jalle19/satip-axe/workflows/Build%20firmware/badge.svg)
+![Build firmware](https://github.com/kodidu/satip-axe/workflows/Build%20firmware/badge.svg)
 
 A firmware with minisatip for Inverto IDL-400s/Grundig GSS.BOX/Telestar Digibit R1
 ==================================================================================
