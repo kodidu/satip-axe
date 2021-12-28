@@ -1,4 +1,4 @@
-BUILD=17
+BUILD=19
 VERSION=$(shell date +%Y%m%d%H%M)-$(BUILD)
 CPUS=$(shell nproc)
 CURDIR=$(shell pwd)
@@ -29,7 +29,11 @@ KMODULES = drivers/usb/serial/cp210x.ko \
 	   drivers/usb/serial/ftdi_sio.ko \
 	   drivers/usb/serial/oti6858.ko
 
-MINISATIP_COMMIT=65f7685c21380164382364b099c12ac810a6080d
+LIBDVBCSA_COMMIT=bc6c0b164a87ce05e9925785cc6fb3f54c02b026 # latest at the time
+LIBDVBCSA=libdvbcsa-master
+LIBDVBCSA_LIB_FILES=libdvbcsa.so libdvbcsa.so.1 libdvbcsa.so.1.0.1
+
+MINISATIP_COMMIT=v1.1.52
 
 BUSYBOX=busybox-1.26.2
 
@@ -38,8 +42,6 @@ DROPBEAR_SBIN_FILES=dropbear
 DROPBEAR_BIN_FILES=dbclient dropbearconvert dropbearkey scp
 
 ETHTOOL=ethtool-3.18
-
-MTD_UTILS_COMMIT=9f107132a6a073cce37434ca9cda6917dd8d866b # v1.5.1
 
 LIBTIRPC_VERSION=0.2.5
 LIBTIRPC=libtirpc-$(LIBTIRPC_VERSION)
@@ -64,11 +66,13 @@ NANO=nano-$(NANO_VERSION)
 NANO_FILENAME=$(NANO).tar.gz
 NANO_DOWNLOAD=http://www.nano-editor.org/dist/v2.8/$(NANO_FILENAME)
 
-# 10663 10937 11234 11398
-OSCAM_REV=11434
+# 10663 10937 11234 11398 11434
+OSCAM_REV=11693
 
 IPERF=iperf-3.1.3
 IPERF_LIB_FILES=libiperf.so libiperf.so.0 libiperf.so.0.0.0
+
+SENDDSQ_COMMIT=6129ccfa3c6e708077a1a527985fe46ecc59e660
 
 define GIT_CLONE
 	@mkdir -p apps
@@ -80,6 +84,18 @@ define WGET
 	@mkdir -p apps
 	wget -q -O $(2) $(1)
 endef
+
+#
+# short-hand for building a releases with Docker
+#
+docker-release:
+	docker build -t satip-axe-make .
+	docker run --rm -v $(shell pwd):/build --user $(shell id -u):$(shell id -g) satip-axe-make all release
+
+docker-clean-release:
+	docker build -t satip-axe-make .
+	git clean -xfd -f
+	docker run --rm -v $(shell pwd):/build --user $(shell id -u):$(shell id -g) satip-axe-make clean all release
 
 #
 # all
@@ -108,11 +124,10 @@ CPIO_SRCS += ethtool
 CPIO_SRCS += minisatip
 CPIO_SRCS += oscam
 CPIO_SRCS += tools/axehelper
-CPIO_SRCS += tools/senddsq
 CPIO_SRCS += nfsutils
 CPIO_SRCS += nano
-CPIO_SRCS += mtd-utils
 CPIO_SRCS += iperf
+CPIO_SRCS += senddsq
 
 fs.cpio: $(CPIO_SRCS)
 	fakeroot tools/do_min_fs.py \
@@ -127,20 +142,20 @@ fs.cpio: $(CPIO_SRCS)
 	  -e "tools/i2c_mangle.ko:lib/modules/axe/i2c_mangle.ko" \
 	  $(foreach m,$(KMODULES), -e "kernel/$(m):lib/modules/$(m)") \
 	  -e "tools/axehelper:sbin/axehelper" \
-	  -e "tools/senddsq:sbin/senddsq" \
 	  -e "apps/$(BUSYBOX)/busybox:bin/busybox" \
 	  $(foreach f,$(DROPBEAR_SBIN_FILES), -e "apps/$(DROPBEAR)/$(f):sbin/$(f)") \
 	  $(foreach f,$(DROPBEAR_BIN_FILES), -e "apps/$(DROPBEAR)/$(f):usr/bin/$(f)") \
 	  -e "apps/$(ETHTOOL)/ethtool:sbin/ethtool" \
 	  $(foreach f,$(RPCBIND_SBIN_FILES), -e "apps/$(RPCBIND)/$(f):usr/sbin/$(f)") \
 	  $(foreach f,$(NFSUTILS_SBIN_FILES), -e "apps/$(NFSUTILS)/$(f):usr/sbin/$(notdir $(f))") \
+	  $(foreach f,$(LIBDVBCSA_LIB_FILES), -e "apps/$(LIBDVBCSA)/src/.libs/$(f):lib/$(f)") \
 	  -e "apps/minisatip/minisatip:sbin/minisatip" \
 	  $(foreach f,$(notdir $(wildcard apps/minisatip/html/*)), -e "apps/minisatip/html/$f:usr/share/minisatip/html/$f") \
 	  -e "apps/$(NANO)/src/nano:usr/bin/nano" \
-	  -e "apps/mtd-utils/nandwrite:usr/sbin/nandwrite2" \
 	  -e "apps/oscam-svn/Distribution/oscam-1.20_svn$(OSCAM_REV)-sh4-linux:sbin/oscamd" \
 	  -e "apps/$(IPERF)/src/.libs/iperf3:bin/iperf3" \
-	  $(foreach f,$(IPERF_LIB_FILES), -e "apps/$(IPERF)/src/.libs/$(f):lib/$(f)")
+	  $(foreach f,$(IPERF_LIB_FILES), -e "apps/$(IPERF)/src/.libs/$(f):lib/$(f)") \
+		-e "apps/unicable/dsqsend/senddsq:sbin/senddsq"
 
 .PHONY: fs-list
 fs-list:
@@ -268,19 +283,21 @@ media-clean:
 # minisatip
 #
 
-apps/minisatip/minisatip:
+apps/minisatip/minisatip: apps/$(LIBDVBCSA)/src/.libs/libdvbcsa.a
 	rm -rf apps/minisatip
 	$(call GIT_CLONE,https://github.com/catalinii/minisatip.git,minisatip,$(MINISATIP_COMMIT))
 	cd apps/minisatip && ./configure \
+		CFLAGS="-I$(CURDIR)/apps/$(LIBDVBCSA)/src" \
+		LDFLAGS="-L$(CURDIR)/apps/$(LIBDVBCSA)/src/.libs" \
 		--enable-axe \
+		--enable-dvbapi \
+		--enable-dvbcsa \
 		--disable-dvbca \
-		--disable-dvbcsa \
 		--disable-dvbaes \
-		--disable-netcv \
-		--disable-satipc
+		--disable-netcv
 	make -C apps/minisatip -j $(CPUS) \
-	  CC=$(TOOLCHAIN)/bin/sh4-linux-gcc \
-	  EXTRA_CFLAGS="-O2 -I$(CURDIR)/kernel/include"
+		CC=$(TOOLCHAIN)/bin/sh4-linux-gcc \
+	  EXTRA_CFLAGS="-O2 -I$(CURDIR)/kernel/include -I$(CURDIR)/apps/$(LIBDVBCSA)/src"
 
 .PHONY: minisatip
 minisatip: apps/minisatip/minisatip
@@ -372,19 +389,27 @@ apps/$(ETHTOOL)/ethtool: apps/$(ETHTOOL)/configure
 ethtool: apps/$(ETHTOOL)/ethtool
 
 #
-# mtd-utils
+# libdvbcsa
 #
+apps/$(LIBDVBCSA)/bootstrap:
+	$(call GIT_CLONE,https://code.videolan.org/videolan/libdvbcsa.git,$(LIBDVBCSA),$(LIBDVBCSA_COMMIT))
 
-apps/mtd-utils/Makefile:
-	$(call GIT_CLONE,git://git.infradead.org/mtd-utils.git,mtd-utils,$(MTD_UTILS_COMMIT))
+apps/$(LIBDVBCSA)/configure: apps/$(LIBDVBCSA)/bootstrap
+	cd apps/$(LIBDVBCSA) && \
+		./bootstrap
 
-apps/mtd-utils/nanddump: apps/mtd-utils/Makefile
-	make -C apps/mtd-utils -j $(CPUS) \
-	  CC=$(TOOLCHAIN)/bin/sh4-linux-gcc \
-	  CFLAGS="-O2 -I$(CURDIR)/kernel/include"
+apps/$(LIBDVBCSA)/src/.libs/libdvbcsa.a: apps/$(LIBDVBCSA)/configure
+	cd apps/$(LIBDVBCSA) && \
+		CC=$(TOOLCHAIN)/bin/sh4-linux-gcc \
+	  CFLAGS="-O2" \
+	./configure \
+	  --host=sh4-linux \
+	  --prefix=/
+		--disable-shared
+	make -C apps/$(LIBDVBCSA) -j $(CPUS)
 
-.PHONY: mtd-utils
-mtd-utils: apps/mtd-utils/nanddump
+.PHONY: libdvbcsa
+libdvbcsa: apps/$(LIBDVBCSA)/src/.libs/libdvbcsa.a
 
 #
 # libtirpc
@@ -496,18 +521,25 @@ apps/$(NANO)/src/nano: apps/$(NANO)/configure
 nano: apps/$(NANO)/src/nano
 
 #
+# senddsq
+#
+
+apps/unicable/dsqsend/senddsq.c:
+	$(call GIT_CLONE,https://github.com/akosinov/unicable.git,unicable,$(SENDDSQ_COMMIT))
+
+apps/unicable/dsqsend/senddsq: apps/unicable/dsqsend/senddsq.c
+	cd apps/unicable && \
+	$(TOOLCHAIN)/bin/sh4-linux-gcc -o dsqsend/senddsq -Wall -lrt dsqsend/senddsq.c
+
+.PHONY: senddsq
+senddsq: apps/unicable/dsqsend/senddsq
+
+#
 # tools/axehelper
 #
 
 tools/axehelper: tools/axehelper.c
 	$(TOOLCHAIN)/bin/sh4-linux-gcc -o tools/axehelper -Wall -lrt tools/axehelper.c
-
-#
-# tools/senddsq
-#
-
-tools/senddsq: tools/senddsq.c
-	$(TOOLCHAIN)/bin/sh4-linux-gcc -o tools/senddsq -Wall -lrt tools/senddsq.c
 
 #
 # clean all

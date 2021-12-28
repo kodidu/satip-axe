@@ -2,6 +2,19 @@
 
 This change log will be updated whenever a new official release is made
 
+## Build 19 (Nov 26 2021)
+* Update `minisatip` to v1.1.50
+* Re-enable SAT>IP client support in minisatip
+* Enable DVB-CSA support in minisatip (due to CPU limitations only 1-2 streams can be decoded simultaneously)
+* Remove the `upgrade-fw` script and some other unused/obsolete utilities
+* Improve the build process (less verbosity, no root-owned files polluting the working directory)
+
+## Build 18 (Jul 11 2021)
+* Update `oscam` to revision 11693
+* Update `minisatip` to v1.1.9-bf62510
+* Replace bundled `senddsq` with upstream (https://github.com/akosinov/unicable, contains one minor fix since last version)
+* Remove bundled `multicast-rtp` script - the firmware ships without Python so the script is essentially useless
+
 ## Build 17 (Jan 31 2021)
 * Update `minisatip` to `191fe62a7a5aaada03ef274511b24238c210693c`, should fix sending of UDP packets (#3)
 * Don't skip SSL certificate checks when running `wget`
